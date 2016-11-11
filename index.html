@@ -2,6 +2,48 @@
 <meta charset="utf-8">
 <style>
 
+.ticks {
+  font: 10px sans-serif;
+}
+
+.track,
+.track-inset,
+.track-overlay {
+  stroke-linecap: round;
+}
+
+.track {
+  stroke: #000;
+  stroke-opacity: 0.3;
+  stroke-width: 10px;
+}
+
+.track-inset {
+  stroke: #ddd;
+  stroke-width: 8px;
+}
+
+.track-overlay {
+  pointer-events: stroke;
+  stroke-width: 50px;
+  cursor: crosshair;
+}
+
+.handle {
+  fill: #fff;
+  stroke: #000;
+  stroke-opacity: 0.5;
+  stroke-width: 1.25px;
+}
+
+</style>
+
+<style>
+
+.counties {
+  fill: none;
+}
+
 .states {
   fill: none;
   stroke: #fff;
@@ -9,49 +51,172 @@
 }
 
 </style>
-<body>
-<script src="//d3js.org/d3.v3.min.js"></script>
-<script src="//d3js.org/queue.v1.min.js"></script>
-<script src="//d3js.org/topojson.v1.min.js"></script>
+<svg width="960" height="600"></svg>
+<script src="https://d3js.org/d3.v4.min.js"></script>
+<script src="https://d3js.org/d3-scale-chromatic.v1.min.js"></script>
+<script src="https://d3js.org/topojson.v2.min.js"></script>
 <script>
 
-var width = 960,
-    height = 500;
+var svg = d3.select("svg"),
+    width = +svg.attr("width"),
+    height = +svg.attr("height");
 
-var color = d3.scale.threshold()
-    .domain([0.02, 0.04, 0.06, 0.08, 0.10])
-    .range(["#f2f0f7", "#dadaeb", "#bcbddc", "#9e9ac8", "#756bb1", "#54278f"]);
+    
+var unemployment = d3.map();
 
-var path = d3.geo.path();
+var path = d3.geoPath();
 
-var svg = d3.select("body").append("svg")
-    .attr("width", width)
-    .attr("height", height);
+var x = d3.scaleLinear()
+    .domain([1, 10])
+    .rangeRound([600, 860]);
 
-queue()
-    .defer(d3.json, "/mbostock/raw/4090846/us.json")
-    .defer(d3.tsv, "unemployment.tsv")
-    .await(ready);
+var color = d3.scaleThreshold()
+    .domain(d3.range(2, 10))
+    .range(d3.schemeBlues[9]);
 
-function ready(error, us, unemployment) {
+var g = svg.append("g")
+    .attr("class", "key")
+    .attr("transform", "translate(0,40)");
+
+g.selectAll("rect")
+  .data(color.range().map(function(d) {
+      d = color.invertExtent(d);
+      if (d[0] == null) d[0] = x.domain()[0];
+      if (d[1] == null) d[1] = x.domain()[1];
+      return d;
+    }))
+  .enter().append("rect")
+    .attr("height", 8)
+    .attr("x", function(d) { return x(d[0]); })
+    .attr("width", function(d) { return x(d[1]) - x(d[0]); })
+    .attr("fill", function(d) { return color(d[0]); });
+
+g.append("text")
+    .attr("class", "caption")
+    .attr("x", x.range()[0])
+    .attr("y", -6)
+    .attr("fill", "#000")
+    .attr("text-anchor", "start")
+    .attr("font-weight", "bold")
+    .text("Unemployment rate");
+    
+
+g.call(d3.axisBottom(x)
+    .tickSize(13)
+    .tickFormat(function(x, i) { return i ? x : x + "%"; })
+    .tickValues(color.domain()))
+  .select(".domain")
+    .remove();
+
+/* d3.queue()
+    .defer(d3.json, "https://d3js.org/us-10m.v1.json")
+    .defer(d3.tsv, "unemployment.tsv", function(d) { unemployment.set(d.id, +d.rate); })
+    .await(ready); */
+
+function ready(error, us) {
   if (error) throw error;
-
-  var rateById = {};
-
-  unemployment.forEach(function(d) { rateById[d.id] = +d.rate; });
 
   svg.append("g")
       .attr("class", "counties")
     .selectAll("path")
-      .data(topojson.feature(us, us.objects.counties).features)
+    .data(topojson.feature(us, us.objects.counties).features)
     .enter().append("path")
+      .attr("fill", function(d) { return color(d.rate = unemployment.get(d.id)); })
       .attr("d", path)
-      .style("fill", function(d) { return color(rateById[d.id]); });
+    .append("title")
+      .text(function(d) { return d.rate + "%"; });
 
   svg.append("path")
-      .datum(topojson.mesh(us, us.objects.states, function(a, b) { return a.id !== b.id; }))
+      .datum(topojson.mesh(us, us.objects.states, function(a, b) { return a !== b; }))
       .attr("class", "states")
       .attr("d", path);
+  
 }
 
+///////////////////
+/* var svg = d3.select("svg"),
+    margin = {right: 50, left: 50},
+    width = +svg.attr("width") - margin.left - margin.right,
+    height = +svg.attr("height"); */
+
+var x = d3.scaleLinear()
+    .domain([0, 150])
+    .range([0, width])
+    .clamp(true);
+
+
+var slider = svg.append("g")
+    .attr("class", "slider")
+    .attr("transform", "translate(25,25)");
+
+slider.append("line")
+    .attr("class", "track")
+    .attr("x1", x.range()[0])
+    .attr("x2", x.range()[1])
+  .select(function() { return this.parentNode.appendChild(this.cloneNode(true)); })
+    .attr("class", "track-inset")
+  .select(function() { return this.parentNode.appendChild(this.cloneNode(true)); })
+    .attr("class", "track-overlay")
+    .call(d3.drag()
+        .on("start.interrupt", function() { slider.interrupt(); })
+        .on("start drag", function() { hue(x.invert(d3.event.x)); }));
+
+/* slider.insert("g", ".track-overlay")
+    .attr("class", "ticks")
+    .attr("transform", "translate(0," + 18 + ")")
+  .selectAll("text")
+  .data(x.ticks(10))
+  .enter().append("text")
+    .attr("x", x)
+    .attr("text-anchor", "middle")
+    .text(function(d) { return d + "°"; }); */
+var handle = slider.insert("circle", ".track-overlay")
+    .attr("class", "handle")
+    .attr("r", 9);
+slider.transition() // Gratuitous intro!
+    .duration(750)
+    .tween("hue", function() {
+      var i = d3.interpolate(0, 70);
+      return function(t) { hue(i(t)); };
+    });
+d3.queue()
+.defer(d3.json, "https://d3js.org/us-10m.v1.json")
+.defer(d3.tsv, "unemployment.tsv", function(d) { 
+	  console.log(d.rate_2009);
+	  unemployment.set(d.id, +d.rate_2005); })
+.await(ready);
+function hue(h) {
+  handle.attr("cx", x(h));
+  if(h<50){
+	  d3.queue()
+	  .defer(d3.json, "https://d3js.org/us-10m.v1.json")
+	  .defer(d3.tsv, "unemployment.tsv", function(d) { 
+	  	  console.log(d.rate_2005);
+	  	  unemployment.set(d.id, +(d.rate_2005)*100); })
+	  .await(ready);
+  }
+  if(h>50 && h<=100){
+	  d3.queue()
+	  .defer(d3.json, "https://d3js.org/us-10m.v1.json")
+	  .defer(d3.tsv, "unemployment.tsv", function(d) { 
+	  	  console.log(d.rate_2007);
+	  	  unemployment.set(d.id, +(d.rate_2007)*100); })
+	  .await(ready);
+  }
+  if(h>100){
+	  d3.queue()
+	  .defer(d3.json, "https://d3js.org/us-10m.v1.json")
+	  .defer(d3.tsv, "unemployment.tsv", function(d) { 
+	  	  console.log(d.rate_2009);
+	  	  unemployment.set(d.id, +(d.rate_2009)*100); })
+	  .await(ready);
+  }
+  //svg.style("background-color", d3.hsl(h, 0.8, 0.8));
+}
+
+
+
+///////////////////
+
 </script>
+<div id="slider2"></div>
